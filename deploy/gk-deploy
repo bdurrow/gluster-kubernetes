@@ -109,12 +109,33 @@ debug() {
   fi
 }
 
+#TODO: This should be more robust
+using_kubectl() {
+  if [[ "${CLI}" =~ kubectl($| ) ]]; then
+    return 0
+  else
+    return 1
+  fi  
+}
+
+#TODO: This should be more robust
+using_oc() {
+  #We test for kubectl first because it is the more unique string
+  if using_kubectl(); then
+    return 1
+  elif [[ "${CLI}" =~ oc($| ) ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 abort() {
   ${CLI} delete all,service,jobs,deployment,secret --selector="deploy-heketi"
   ${CLI} delete dc,svc,routes heketi
   ${CLI} delete svc/heketi-storage-endpoints
   ${CLI} delete sa heketi-service-account
-  if [[ "${CLI}" == *oc ]]; then
+  if using_oc(); then
     ${CLI} delete template deploy-heketi
     ${CLI} delete template heketi
   fi
@@ -124,7 +145,7 @@ abort() {
       ${CLI} label nodes ${node} storagenode-
     done <<< "$(echo -e "${NODES}")"
     ${CLI} delete all,service,jobs,ds,secret --selector="glusterfs"
-    if [[ "${CLI}" == *oc ]]; then
+    if using_oc(); then
       ${CLI} delete template glusterfs
     fi
   fi
@@ -349,9 +370,9 @@ if [[ "x${CLI}" == "x" ]]; then
   fi
 fi
 
-if [[ "${CLI}" == *oc ]]; then
+if using_oc(); then
   output "Using OpenShift CLI."
-elif [[ "${CLI}" == *kubectl ]]; then
+elif using_kubectl; then
   output "Using Kubernetes CLI."
 else
   output "Unknown CLI '${CLI}'."
@@ -359,7 +380,7 @@ else
 fi
 
 if [[ "x${TEMPLATES}" == "x" ]]; then
-  if [[ "${CLI}" == *oc ]]; then
+  if using_oc(); then
     TEMPLATES="${OCP_TEMPLATES_DEFAULT}"
   else
     TEMPLATES="${KUBE_TEMPLATES_DEFAULT}"
@@ -396,7 +417,7 @@ if [[ ${ABORT} -eq 1 ]]; then
 fi
 
 if [[ ${LOAD} -eq 0 ]]; then
-  if [[ "${CLI}" == *oc ]]; then
+  if using_oc(); then
     ${CLI} create -f ${TEMPLATES}/deploy-heketi-template.yaml
     ${CLI} create -f ${TEMPLATES}/heketi-service-account.yaml
     ${CLI} create -f ${TEMPLATES}/heketi-template.yaml
@@ -416,7 +437,7 @@ if [[ $GLUSTER -eq 1 ]] && [[ ${LOAD} -eq 0 ]]; then
     ${CLI} label nodes ${node} storagenode=glusterfs
   done <<< "$(echo -e "${NODES}")"
   debug "Deploying GlusterFS pods."
-  if [[ "${CLI}" == *oc ]]; then
+  if using_oc(); then
     ${CLI} process glusterfs | ${CLI} create -f -
   else
     ${CLI} create -f ${TEMPLATES}/glusterfs-daemonset.yaml
@@ -428,7 +449,7 @@ if [[ $GLUSTER -eq 1 ]] && [[ ${LOAD} -eq 0 ]]; then
 fi
 
 if [[ ${LOAD} -eq 0 ]]; then
-  if [[ "${CLI}" == *oc ]]; then
+  if using_oc(); then
     ${CLI} process deploy-heketi | ${CLI} create -f -
   else
     ${CLI} create -f ${TEMPLATES}/deploy-heketi-deployment.yaml
@@ -442,7 +463,7 @@ output "OK"
 heketi_service=""
 debug -n "Determining heketi service URL ... "
 while [[ "x${heketi_service}" == "x" ]]; do
-  if [[ "${CLI}" == *oc ]]; then
+  if using_oc(); then
     heketi_service=$(${CLI} describe routes/deploy-heketi | grep "Requested Host:" | awk '{print $3}')
   else
     heketi_service=$(${CLI} describe svc/deploy-heketi | grep "Endpoints:" | awk '{print $2}')
@@ -454,7 +475,7 @@ debug "OK"
 hello=$(curl http://${heketi_service}/hello 2>/dev/null)
 if [[ "${hello}" != "Hello from Heketi" ]]; then
   output "Failed to communicate with deploy-heketi service."
-  if [[ "${CLI}" == *oc ]]; then
+  if using_oc(); then
     output "Please verify that a router has been properly configured."
   fi
   abort
@@ -489,7 +510,7 @@ check_pods "job-name=heketi-storage-copy-job" "Completed"
 
 ${CLI} delete all,service,jobs,deployment,secret --selector="deploy-heketi"
 
-if [[ "${CLI}" == *oc ]]; then
+if using_oc(); then
   ${CLI} process heketi | ${CLI} create -f -
 else
   ${CLI} create -f ${TEMPLATES}/heketi-deployment.yaml
@@ -502,7 +523,7 @@ output "OK"
 heketi_service=""
 debug -n "Determining heketi service URL ... "
 while [[ "x${heketi_service}" == "x" ]]; do
-  if [[ "${CLI}" == *oc ]]; then
+  if using_oc(); then
     heketi_service=$(${CLI} describe routes/heketi | grep "Requested Host:" | awk '{print $3}')
   else
     heketi_service=$(${CLI} describe svc/heketi | grep "Endpoints:" | awk '{print $2}')
@@ -514,7 +535,7 @@ debug "OK"
 hello=$(curl http://${heketi_service}/hello 2>/dev/null)
 if [[ "${hello}" != "Hello from Heketi" ]]; then
   output "Failed to communicate with heketi service."
-  if [[ "${CLI}" == *oc ]]; then
+  if using_oc(); then
     output "Please verify that a router has been properly configured."
   fi
   abort
